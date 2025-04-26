@@ -12,3 +12,6 @@
 10. Multimodal Prompting: The model is given a combination of text, images, or other modalities to generate a response.
 
 
+
+Link to prompting:
+https://www.promptingguide.ai/
