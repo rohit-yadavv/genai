@@ -30,7 +30,7 @@ embedder = OpenAIEmbeddings(model="text-embedding-3-large", api_key="")
 print("Injection Done")
 
 retriver = QdrantVectorStore.from_existing_collection(
-    url="http://localhost:6333",s
+    url="http://localhost:6333",
     collection_name="learning_langchain",
     embedding=embedder,
 )
