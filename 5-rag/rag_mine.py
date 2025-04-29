@@ -3,70 +3,113 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
+from openai import OpenAI
+import os
+
+# Constants
+PDF_PATH = "nodejs.pdf"
+QDRANT_URL = "http://localhost:6333"
+COLLECTION_NAME = "learning_langchain"
+EMBED_MODEL = "models/embedding-001"
 
 
-# Data → Chunk → Embed → Store → Search → Retrieve → LLM → Output
+def load_and_split_pdf(file_path: str):
+    """
+    Load PDF and split into overlapping chunks.
+    """
+    loader = PyPDFLoader(file_path)
+    documents = loader.load()
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    return splitter.split_documents(documents)
 
 
 def index_documents():
     """
-    Loads a PDF, splits it into chunks, creates embeddings,
-    and indexes them in a Qdrant vector store.
-    Run this only once for initial indexing of documents.
+    Load, chunk, embed and index PDF content into Qdrant vector DB.
+    Run once during setup.
     """
-    file_path = Path("nodejs.pdf")
+    chunks = load_and_split_pdf(PDF_PATH)
+    embedder = GoogleGenerativeAIEmbeddings(model=EMBED_MODEL)
 
-    # Load PDF using LangChain's PyPDFLoader
-    loader = PyPDFLoader(str(file_path))
-    documents = loader.load()
-
-    # Split documents into chunks of 1000 characters with 200 character overlap
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = splitter.split_documents(documents)
-
-    # Create embeddings using Google Generative AI
-    embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-
-    # Index the chunked documents into Qdrant
     QdrantVectorStore.from_documents(
         documents=chunks,
-        embedding=embedding_model,
-        url="http://localhost:6333",  # Ensure Qdrant is running locally
-        collection_name="learning_langchain",  # Specify the collection name
+        embedding=embedder,
+        url=QDRANT_URL,
+        collection_name=COLLECTION_NAME,
     )
 
     print("✅ Documents successfully indexed into Qdrant.")
 
 
-def query_documents():
+def retrieve_relevant_docs(query: str):
     """
-    Connects to the existing Qdrant collection and allows querying via CLI.
-    Provides semantic search results for user queries.
+    Connect to Qdrant and retrieve all relevant documents for a query.
     """
-    # Create the embedding model (should match the model used during indexing)
-    embedder = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    embedder = GoogleGenerativeAIEmbeddings(model=EMBED_MODEL)
 
-    # Connect to the existing Qdrant vector store
     retriever = QdrantVectorStore.from_existing_collection(
-        url="http://localhost:6333",
-        collection_name="learning_langchain",
+        url=QDRANT_URL,
+        collection_name=COLLECTION_NAME,
         embedding=embedder,
     )
 
+    results = retriever.similarity_search(query)
+    return [doc.page_content for doc in results]
+
+
+def chat_with_context(query: str, context_chunks: list[str]):
+    """
+    Send user query and full context (all relevant chunks) to OpenAI for a response.
+    """
+    # Join all context chunks into a single string (as context_chunks is array so we are converting it into string)
+
+    # Combine all chunks (array) into a single string,
+    # separated by double newlines for better readability in the LLM prompt (after each chunk give two new black lines)
+    context = "\n\n".join(context_chunks)
+
+    system_prompt = f"""
+You are a helpful AI assistant. Resolve user queries using the following context:
+{context}
+"""
+
+    client = OpenAI(
+        api_key=os.getenv("GEMINI_API_KEY"),
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    )
+
+    response = client.chat.completions.create(
+        model="gemini-2.5-flash-preview-04-17",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": query},
+        ],
+    )
+
+    print("\n📘 Response:")
+    print(response.choices[0].message.content)
+
+
+def interactive_cli():
+    """
+    Start command-line interface for interactive Q&A.
+    """
     print("🔍 Ready to search. Type your query (or 'exit' to quit):")
     while True:
         query = input("> ").strip()
         if query.lower() in ["exit", "quit"]:
             break
 
-        # Perform similarity search and retrieve documents
-        results = retriever.similarity_search(query=query)
-        for doc in results:
-            print(f"\n{doc.page_content}\n{'-'*40}")
+        context_chunks = retrieve_relevant_docs(query)
+        if not context_chunks:
+            print("⚠️ No relevant documents found.")
+            continue
+
+        chat_with_context(query, context_chunks)
 
 
 if __name__ == "__main__":
-    # Uncomment one of the two lines below depending on the use case
+    # Uncomment to index documents initially
+    # index_documents()
 
-    # insert_documents()  # ← Run this only once to insert data into Qdrant
-    query_documents()  # ← Run this to start querying the inserted data
+    interactive_cli()
