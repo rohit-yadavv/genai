@@ -12,6 +12,10 @@ QDRANT_URL = "http://localhost:6333"
 COLLECTION_NAME = "learning_langchain"
 EMBED_MODEL = "models/embedding-001"
 
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = (
+    "E:\Downloads\gemini-key-for-learining-02807fd398a1.json"
+)
+
 
 def load_and_split_pdf(file_path: str):
     """
